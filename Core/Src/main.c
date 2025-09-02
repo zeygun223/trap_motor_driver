@@ -19,20 +19,16 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
 #include <math.h>
 #include <stdint.h>
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-CAN_TxHeaderTypeDef pTxHeader;
-uint32_t pTxMailbox;
-CAN_FilterTypeDef sFilterConfig;
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -45,22 +41,6 @@ typedef enum{
 }MotorDurum;
 MotorDurum motor_durum = MOTOR_BASLA;
 
-#define KUTUP_SAYISI       36            // rotor poles (gerçeği girin)
-#define HALL_PER_ELEC      6             // 6 hall geçişi = 1 elektriksel devir
-// Teker çevresi (m): gerçek değeri girin (örn. 2.10f)
-#define TEKER_CEVRESI_M    2.10f
-// Şanzıman/dişli oranı: motor_deviri / teker_deviri (yoksa 1.0f)
-#define GEAR_ORANI         1.0f
-#define RPM_FILTER_ALPHA   0.2f        // IIR filtre katsayısı
-#define HALL_DEBOUNCE_US   150         // Hall kenarları için minimum kabul edilen süre (mikrosaniye)
-#define MIN_PERIOD_US      300         // Gürültü filtre: çok kısa periyotları yok say
-#define MAX_MECH_RPM       810.0f      // Fiziksel olarak makul olmayan büyük RPM'leri reddet
-
-volatile float elektriksel_rpm = 0.0f;
-volatile float mekanik_rpm     = 0.0f;
-volatile float hiz_kmh         = 0.0f;
-volatile float mekanik_rpm_filtered = 0.0f;
-volatile float hiz_kmh_filtered     = 0.0f;
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -86,35 +66,11 @@ UART_HandleTypeDef huart1;
 uint32_t pedal_degeri;
 uint32_t pwm_deger=0;
 uint32_t pwm_deger_1 = 0;
-uint32_t kontrol =1;
 bool hall1 ;
 bool hall2 ;
 bool hall3 ;
-uint32_t hareket_sayac = 0;
 uint8_t adım = 0;  //adım = 1 di
-uint32_t son_tick = 0;
-uint32_t hall_tick_farki = 0;
-float motor_rpm = 0;
-uint8_t gecis_sayisi = 108; //36 kutup 18 çift kutup x 6 =  108 geçiş
-float hız =0;
-uint32_t hall_sayaci =0;
 bool yon = true ;
-float sure = 0;
-bool ilk_gecis_yapildi = false;
-bool ilk_gecis_yapildi_1 = true;
-bool pedal_basildi = false;
-bool pedal_bosta = true;
-volatile uint32_t fark = 0;
-float pole_pairs = (float)KUTUP_SAYISI / 2.0f;
-// Hız/RPM ölçümü için
-volatile uint32_t hall_eski = 0;
-volatile uint32_t hall_onceki  = 0;
-volatile uint32_t hall_delta_us = 0;
-volatile uint8_t  hall_gecis_say = 0;
-volatile uint8_t  hal_kod_onceki = 0xFF;  // ilk karşılaştırma için geçersiz
-volatile uint32_t hall_timeout_ms = 0;    // durma zaman aşımı
-uint32_t simdiki_tick= 0;
-volatile uint8_t tim2_ready = 0;          // TIM2 sayacı kullanılabilir mi?
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -267,24 +223,13 @@ if(yon)  //ileri yön dönüş adımları
 	}
 }
 
-void hareket_baslat()
-{
-	/* hareket_sayac++;
-			  	if(hareket_sayac>=3)
-			  	{
-			  		hareket_sayac = 0;
-			  		hareket(adım);
-			  	} */
-	hareket(adım);
-}
-
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
 
 	yon = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0);
 	if(hadc->Instance == ADC1)
 	{
-		pwm_deger_1 =map((int32_t)pedal_degeri,1300,4095,0,100); //değiştirdim
+		pwm_deger_1 =map(pedal_degeri,1300,4095,0,100);
 
 		if(pwm_deger_1 > 100)
 	   {
@@ -294,13 +239,6 @@ pwm_deger = pwm_deger_1;
 	  if(pwm_deger < 10)
 			  {
 			  motor_durum = MOTOR_BASLA;
-			/* if(pedal_bosta == true)
-		 {
-		motor_rpm = 0;
-		hız = 0;
-		pedal_bosta = false;
-					 } */
-
 			  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, 1); //SD pinini sıfıra çek
 			  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, 1);
 			  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, 1);
@@ -311,12 +249,11 @@ pwm_deger = pwm_deger_1;
 			  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_8, 0);
 			  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_7, 0);
 			  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_6, 0);
-			  ilk_gecis_yapildi = false;
 			  }
 		  else if(pwm_deger > 10)
 		  {
 			  motor_durum = MOTOR_KAPALI_CEVRİM;
-			  hareket_baslat();
+			  hareket(adım);
 	}
 }
 }
@@ -363,8 +300,7 @@ int main(void)
 HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_1); //A PWM HİGH başlat
 HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_2); //B PWM HİGH başlat
 HAL_TIM_PWM_Start(&htim1,TIM_CHANNEL_3); //C PWM HİGH başlat
-HAL_TIM_Base_Start(&htim2);
-tim2_ready = 1;
+
 HAL_ADC_Start_DMA(&hadc1, &pedal_degeri, 1);
 HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3, 1); //SD pinini sıfıra çek
 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, 1);
@@ -383,12 +319,6 @@ __HAL_TIM_SetCompare(&htim1, TIM_CHANNEL_3, 0);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	/*  HAL_ADC_Start(&hadc1);
-	  HAL_ADC_PollForConversion(&hadc1, 1);
-	  pedal_degeri=HAL_ADC_GetValue(&hadc1);*/
-	 // pwm_deger =map(pedal_degeri,1300,4095,0,100);
-
-
   }
   /* USER CODE END 3 */
 }
