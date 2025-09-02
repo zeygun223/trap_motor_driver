@@ -71,6 +71,7 @@ bool hall2 ;
 bool hall3 ;
 uint8_t adım = 0;  //adım = 1 di
 bool yon = true ;
+int hiz = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
